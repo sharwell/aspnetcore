@@ -3,7 +3,9 @@
 
 using System;
 using System.Globalization;
+using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using BasicTestApp.AuthTest;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -25,16 +27,19 @@ namespace BasicTestApp
 
             var builder = WebAssemblyHostBuilder.CreateDefault(args);
 
+            builder.RootComponents.Add<Index>("root");
+
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("WEBASSEMBLY")))
             {
                 // Needed because the test server runs on a different port than the client app,
                 // and we want to test sending/receiving cookies under this config
-                WebAssemblyHttpMessageHandlerOptions.DefaultCredentials = FetchCredentialsOption.Include;
+                builder.Services.AddBaseAddressHttpClient(new ConfigureCorsHandler(WebAssemblyHttpMessageHandler.CreateDefault()));
+            }
+            else
+            {
+                builder.Services.AddBaseAddressHttpClient();
             }
 
-            builder.RootComponents.Add<Index>("root");
-
-            builder.Services.AddBaseAddressHttpClient();
             builder.Services.AddSingleton<AuthenticationStateProvider, ServerAuthenticationStateProvider>();
             builder.Services.AddAuthorizationCore(options =>
             {
@@ -59,6 +64,20 @@ namespace BasicTestApp
             if (currentUrl.Contains("error=async"))
             {
                 throw new InvalidTimeZoneException("This is an asynchronous startup exception");
+            }
+        }
+
+        private class ConfigureCorsHandler : DelegatingHandler
+        {
+            public ConfigureCorsHandler(HttpMessageHandler instance)
+                : base(instance)
+            {
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                request.WithRequestCredentials(RequestCredentials.Include);
+                return base.SendAsync(request, cancellationToken);
             }
         }
     }
