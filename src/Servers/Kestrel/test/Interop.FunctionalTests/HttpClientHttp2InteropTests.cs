@@ -1316,31 +1316,39 @@ namespace Interop.FunctionalTests
         [MemberData(nameof(SupportedSchemes))]
         public async Task Settings_MaxFrameSize_Larger_Server(string scheme)
         {
-            var hostBuilder = new HostBuilder()
-                .ConfigureWebHost(webHostBuilder =>
-                {
-                    ConfigureKestrel(webHostBuilder, scheme);
-                    webHostBuilder.ConfigureKestrel(options => options.Limits.Http2.MaxFrameSize = 1024 * 20); // The default is 16kb
+            try
+            {
+                var hostBuilder = new HostBuilder()
+                    .ConfigureWebHost(webHostBuilder =>
+                    {
+                        ConfigureKestrel(webHostBuilder, scheme);
+                        webHostBuilder.ConfigureKestrel(options => options.Limits.Http2.MaxFrameSize = 1024 * 20); // The default is 16kb
                     webHostBuilder.ConfigureServices(AddTestLogging)
-                    .Configure(app => app.Run(context => context.Response.WriteAsync("Hello World")));
-                });
-            using var host = await hostBuilder.StartAsync().DefaultTimeout();
+                        .Configure(app => app.Run(context => context.Response.WriteAsync("Hello World")));
+                    });
+                using var host = await hostBuilder.StartAsync().DefaultTimeout();
 
-            var url = host.MakeUrl(scheme);
-            using var client = CreateClient();
-            // Send an initial request to ensure the settings get synced before the real test.
-            var responseBody = await client.GetStringAsync(url).DefaultTimeout();
-            Assert.Equal("Hello World", responseBody);
+                var url = host.MakeUrl(scheme);
+                using var client = CreateClient();
+                // Send an initial request to ensure the settings get synced before the real test.
+                var responseBody = await client.GetStringAsync(url).DefaultTimeout();
+                Assert.Equal("Hello World", responseBody);
 
-            var response = await client.PostAsync(url, new ByteArrayContent(new byte[1024 * 18])).DefaultTimeout();
-            response.EnsureSuccessStatusCode();
-            Assert.Equal("Hello World", await response.Content.ReadAsStringAsync());
+                var response = await client.PostAsync(url, new ByteArrayContent(new byte[1024 * 18])).DefaultTimeout();
+                response.EnsureSuccessStatusCode();
+                Assert.Equal("Hello World", await response.Content.ReadAsStringAsync());
 
-            // SKIP: The client does not take advantage of a larger allowed frame size.
-            // https://github.com/dotnet/runtime/blob/48a78bfa13e9c710851690621fc2c0fe1637802c/src/libraries/System.Net.Http/src/System/Net/Http/SocketsHttpHandler/Http2Connection.cs#L483-L488
-            // Assert.Single(TestSink.Writes.Where(context => context.Message.Contains("received DATA frame for stream ID 1 with length 18432 and flags NONE")));
+                // SKIP: The client does not take advantage of a larger allowed frame size.
+                // https://github.com/dotnet/runtime/blob/48a78bfa13e9c710851690621fc2c0fe1637802c/src/libraries/System.Net.Http/src/System/Net/Http/SocketsHttpHandler/Http2Connection.cs#L483-L488
+                // Assert.Single(TestSink.Writes.Where(context => context.Message.Contains("received DATA frame for stream ID 1 with length 18432 and flags NONE")));
 
-            await host.StopAsync().DefaultTimeout();
+                await host.StopAsync().DefaultTimeout();
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
         }
 
         // Settings_MaxFrameSize_Larger_Client - Not configurable
@@ -1603,6 +1611,7 @@ namespace Interop.FunctionalTests
             var handler = new HttpClientHandler();
             handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
             var client = new HttpClient(handler);
+            client.Timeout = Timeout.InfiniteTimeSpan;
             client.DefaultRequestVersion = HttpVersion.Version20;
             return client;
         }

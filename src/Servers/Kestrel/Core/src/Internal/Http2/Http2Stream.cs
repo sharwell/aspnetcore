@@ -20,13 +20,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
     internal abstract partial class Http2Stream : HttpProtocol, IThreadPoolWorkItem
     {
         private Http2StreamContext _context;
-        private Http2OutputProducer _http2Output;
+        private readonly Http2OutputProducer _http2Output = new Http2OutputProducer();
         private StreamInputFlowControl _inputFlowControl;
         private StreamOutputFlowControl _outputFlowControl;
 
         private bool _decrementCalled;
 
         public Pipe RequestBodyPipe { get; set; }
+        public bool Returnable { get; private set; }
 
         internal long DrainExpirationTicks { get; set; }
 
@@ -42,7 +43,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
             InputRemaining = null;
             RequestBodyStarted = false;
             DrainExpirationTicks = 0;
+            Returnable = false;
 
+            var oldContext = _context;
             _context = context;
 
             _inputFlowControl = new StreamInputFlowControl(
@@ -56,15 +59,23 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
                 context.ConnectionOutputFlowControl,
                 context.ClientPeerSettings.InitialWindowSize);
 
-            _http2Output = new Http2OutputProducer(
-                context.StreamId,
-                context.FrameWriter,
-                _outputFlowControl,
-                context.MemoryPool,
-                this,
-                context.ServiceContext.Log);
+            _http2Output.Initialize(context, this, _outputFlowControl);
 
-            RequestBodyPipe = CreateRequestBodyPipe(context.ServerPeerSettings.InitialWindowSize);
+            if (RequestBodyPipe != null &&
+                context.MemoryPool == oldContext.MemoryPool &&
+                context.ServerPeerSettings.InitialWindowSize == oldContext.ServerPeerSettings.InitialWindowSize)
+            {
+                // We can reuse the request pipe if stream's memory pool and initial window size is the same
+                RequestBodyPipe.Reset();
+            }
+            else
+            {
+                RequestBodyPipe = CreateRequestBodyPipe(
+                    context.ServerPeerSettings.InitialWindowSize,
+                    context.MemoryPool,
+                    ServiceContext.Scheduler);
+            }
+
             Output = _http2Output;
         }
 
@@ -122,7 +133,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
                     }
                 }
 
-                _http2Output.Dispose();
+                _http2Output.Complete();
 
                 RequestBodyPipe.Reader.Complete();
 
@@ -131,6 +142,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
                 _inputFlowControl.Abort();
 
                 Reset();
+
+                // The stream has finished without and is ready to be returned
+                Returnable = true;
             }
             finally
             {
@@ -530,18 +544,18 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
             _context.StreamLifetimeHandler.DecrementActiveClientStreamCount();
         }
 
-        private Pipe CreateRequestBodyPipe(uint windowSize)
+        private static Pipe CreateRequestBodyPipe(uint windowSize, MemoryPool<byte> memoryPool, PipeScheduler pipeScheduler)
             => new Pipe(new PipeOptions
             (
-                pool: _context.MemoryPool,
-                readerScheduler: ServiceContext.Scheduler,
+                pool: memoryPool,
+                readerScheduler: pipeScheduler,
                 writerScheduler: PipeScheduler.Inline,
                 // Never pause within the window range. Flow control will prevent more data from being added.
                 // See the assert in OnDataAsync.
                 pauseWriterThreshold: windowSize + 1,
                 resumeWriterThreshold: windowSize + 1,
                 useSynchronizationContext: false,
-                minimumSegmentSize: _context.MemoryPool.GetMinimumSegmentSize()
+                minimumSegmentSize: memoryPool.GetMinimumSegmentSize()
             ));
 
         private (StreamCompletionFlags OldState, StreamCompletionFlags NewState) ApplyCompletionFlag(StreamCompletionFlags completionState)

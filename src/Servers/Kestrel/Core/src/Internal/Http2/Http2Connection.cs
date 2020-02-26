@@ -606,7 +606,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
 
         private void ReturnStream(Http2Stream stream)
         {
-            if (_streamPool.Count < MaxStreamPoolSize)
+            if (stream.Returnable && _streamPool.Count < MaxStreamPoolSize)
             {
                 _streamPool.Push(stream);
             }
