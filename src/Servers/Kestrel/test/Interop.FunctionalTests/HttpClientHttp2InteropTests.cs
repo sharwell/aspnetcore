@@ -1322,7 +1322,7 @@ namespace Interop.FunctionalTests
                     ConfigureKestrel(webHostBuilder, scheme);
                     webHostBuilder.ConfigureKestrel(options => options.Limits.Http2.MaxFrameSize = 1024 * 20); // The default is 16kb
                     webHostBuilder.ConfigureServices(AddTestLogging)
-                            .Configure(app => app.Run(context => context.Response.WriteAsync("Hello World")));
+                    .Configure(app => app.Run(context => context.Response.WriteAsync("Hello World")));
                 });
             using var host = await hostBuilder.StartAsync().DefaultTimeout();
 
