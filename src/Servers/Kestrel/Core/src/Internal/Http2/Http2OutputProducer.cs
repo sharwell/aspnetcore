@@ -55,7 +55,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
             _suffixSent = false;
             _startedWritingDataFrames = false;
             _streamCompleted = false;
-            _writerComplete = false;
 
             if (_writerComplete && _memoryPool == context.MemoryPool)
             {
@@ -77,6 +76,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http2
                 _flusher = new TimingPipeFlusher(_pipeWriter, timeoutControl: null, _log);
             }
 
+            _writerComplete = false;
             _dataWriteProcessingTask = ProcessDataWrites();
         }
 
